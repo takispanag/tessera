@@ -1,0 +1,15 @@
+[package]
+name = "tessera"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+authors = ["Takis Panagiotopoulos"]
+repository = "https://github.com/takispanag/tessera"
+description = "A terminal emulator engine: VT/xterm parser, screen model and scrollback."
+keywords = ["terminal", "emulator", "vt100", "tui"]
+categories = ["command-line-interface"]
+
+# The engine is deliberately dependency free. Nothing here parses escape
+# sequences, allocates a grid or measures a character for us.
+[dependencies]

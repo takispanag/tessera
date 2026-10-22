@@ -1,0 +1,14 @@
+# Rust build artefacts
+/target
+**/*.rs.bk
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local recordings and scratch output
+*.log
+/scratch/
