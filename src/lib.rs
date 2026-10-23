@@ -15,5 +15,9 @@
 //! front end feeds it text and reads the grid back, which keeps the
 //! interesting part testable without a display.
 
+pub mod cell;
+
+pub use cell::{Attributes, Cell, Color, Pen};
+
 /// Engine version, taken from `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
