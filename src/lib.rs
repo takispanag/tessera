@@ -16,8 +16,10 @@
 //! interesting part testable without a display.
 
 pub mod cell;
+pub mod grid;
 
 pub use cell::{Attributes, Cell, Color, Pen};
+pub use grid::Grid;
 
 /// Engine version, taken from `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
