@@ -18,10 +18,12 @@
 pub mod cell;
 pub mod grid;
 pub mod parser;
+pub mod screen;
 
 pub use cell::{Attributes, Cell, Color, Pen};
 pub use grid::Grid;
 pub use parser::{Action, Csi, Parser};
+pub use screen::{Point, Screen};
 
 /// Engine version, taken from `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
