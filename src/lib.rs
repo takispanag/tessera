@@ -17,6 +17,7 @@
 
 pub mod cell;
 pub mod grid;
+mod csi;
 pub mod parser;
 pub mod screen;
 

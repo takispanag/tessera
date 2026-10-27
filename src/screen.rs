@@ -1,9 +1,9 @@
-//! The screen: the grid plus everything the escape stream can change.
+﻿//! The screen: the grid plus everything the escape stream can change.
 //!
 //! This is the layer that knows the specification. The parser hands it one
 //! action at a time; the grid stores the result. Everything a program can do to
-//! a terminal — printing, moving, erasing, scrolling, setting attributes,
-//! switching to the alternate screen — is a method here.
+//! a terminal β€” printing, moving, erasing, scrolling, setting attributes,
+//! switching to the alternate screen β€” is a method here.
 
 use crate::cell::{Cell, Pen};
 use crate::grid::Grid;
@@ -24,18 +24,18 @@ impl Point {
 
 /// A terminal screen.
 pub struct Screen {
-    grid: Grid,
-    cursor: Point,
-    pen: Pen,
-    parser: Parser,
-    scroll_top: u16,
-    scroll_bottom: u16,
-    autowrap: bool,
-    wrap_pending: bool,
+    pub(crate) grid: Grid,
+    pub(crate) cursor: Point,
+    pub(crate) pen: Pen,
+    pub(crate) parser: Parser,
+    pub(crate) scroll_top: u16,
+    pub(crate) scroll_bottom: u16,
+    pub(crate) autowrap: bool,
+    pub(crate) wrap_pending: bool,
 }
 
 impl Screen {
-    /// A blank screen of `cols` × `rows` with the cursor at the top left.
+    /// A blank screen of `cols` Γ— `rows` with the cursor at the top left.
     pub fn new(cols: u16, rows: u16) -> Self {
         let rows = rows.max(1);
         let cols = cols.max(1);
@@ -173,8 +173,15 @@ impl Screen {
         }
     }
 
-    fn csi(&mut self, _csi: Csi) {
-        // Control sequences arrive in the next commits.
+    fn csi(&mut self, csi: Csi) {
+        crate::csi::dispatch(self, csi);
+    }
+
+    /// Moves the cursor, clamping it to the screen.
+    pub(crate) fn move_to(&mut self, x: i32, y: i32) {
+        self.cursor.x = x.clamp(0, i32::from(self.cols()) - 1) as u16;
+        self.cursor.y = y.clamp(0, i32::from(self.rows()) - 1) as u16;
+        self.wrap_pending = false;
     }
 }
 
