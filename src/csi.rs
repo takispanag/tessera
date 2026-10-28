@@ -1,10 +1,10 @@
-//! Control-sequence dispatch.
+﻿//! Control-sequence dispatch.
 //!
 //! The parser hands over one sequence at a time; this module decides what it
 //! means. Sequences are grouped the way ECMA-48 groups them: cursor movement,
-//! editing, attributes, modes, scrolling and device control. This commit covers
-//! the cursor group.
+//! editing, attributes, modes, scrolling and device control.
 
+use crate::cell::Pen;
 use crate::parser::Csi;
 use crate::screen::Screen;
 
@@ -37,7 +37,53 @@ pub(crate) fn dispatch(screen: &mut Screen, csi: Csi) {
             let col = i32::from(csi.param(1, 1));
             screen.move_to(col - 1, row - 1);
         }
+        // Erase in display: 0 to the end, 1 from the start, 2 the whole screen.
+        'J' => erase_in_display(screen, csi.param(0, 0)),
+        // Erase in line: 0 to the end, 1 from the start, 2 the whole line.
+        'K' => erase_in_line(screen, csi.param(0, 0)),
+        // Erase, insert and delete characters.
+        'X' => screen.erase_chars(csi.param(0, 1)),
+        '@' => screen.insert_chars(csi.param(0, 1)),
+        'P' => screen.delete_chars(csi.param(0, 1)),
+        // Insert and delete lines, and scroll the region.
+        'L' => screen.insert_lines(csi.param(0, 1)),
+        'M' => screen.delete_lines(csi.param(0, 1)),
+        'S' => screen.scroll_up(csi.param(0, 1)),
+        'T' => screen.scroll_down(csi.param(0, 1)),
         _ => {}
+    }
+}
+
+fn erase_in_display(screen: &mut Screen, mode: u16) {
+    let pen = Pen::default();
+    let (cx, cy) = (screen.cursor.x, screen.cursor.y);
+    let last_row = screen.rows() - 1;
+    let last_col = screen.cols() - 1;
+    match mode {
+        1 => {
+            if cy > 0 {
+                screen.grid.clear_rows(0, cy - 1, pen);
+            }
+            screen.grid.erase_cells(cy, 0, cx, pen);
+        }
+        2 | 3 => screen.grid.clear(),
+        _ => {
+            screen.grid.erase_cells(cy, cx, last_col, pen);
+            if cy < last_row {
+                screen.grid.clear_rows(cy + 1, last_row, pen);
+            }
+        }
+    }
+}
+
+fn erase_in_line(screen: &mut Screen, mode: u16) {
+    let pen = Pen::default();
+    let (cx, cy) = (screen.cursor.x, screen.cursor.y);
+    let last_col = screen.cols() - 1;
+    match mode {
+        1 => screen.grid.erase_cells(cy, 0, cx, pen),
+        2 => screen.grid.erase_cells(cy, 0, last_col, pen),
+        _ => screen.grid.erase_cells(cy, cx, last_col, pen),
     }
 }
 
@@ -50,6 +96,12 @@ mod tests {
         let mut screen = Screen::new(10, 5);
         screen.feed(input);
         screen.cursor()
+    }
+
+    fn shown(input: &str) -> Vec<String> {
+        let mut screen = Screen::new(8, 3);
+        screen.feed(input);
+        (0..3).map(|y| screen.line(y)).collect()
     }
 
     #[test]
@@ -69,7 +121,7 @@ mod tests {
     #[test]
     fn next_and_previous_line_return_to_the_first_column() {
         assert_eq!(at("abc\x1b[E"), Point::new(0, 1));
-        assert_eq!(at("\n\nabc\x1b[F"), Point::new(0, 1));
+        assert_eq!(at("\r\n\r\nabc\x1b[F"), Point::new(0, 1));
     }
 
     #[test]
@@ -90,5 +142,65 @@ mod tests {
     #[test]
     fn unknown_sequences_are_ignored() {
         assert_eq!(at("\x1b[99z"), Point::new(0, 0));
+    }
+
+    #[test]
+    fn erasing_the_display_from_the_cursor() {
+        let out = shown("aaaaaaaa\r\nbbbbbbbb\r\ncccccccc\x1b[2;3H\x1b[J");
+        assert_eq!(out, vec!["aaaaaaaa", "bb", ""]);
+    }
+
+    #[test]
+    fn erasing_the_display_to_the_cursor() {
+        let out = shown("aaaaaaaa\r\nbbbbbbbb\r\ncccccccc\x1b[2;3H\x1b[1J");
+        assert_eq!(out, vec!["", "   bbbbb", "cccccccc"]);
+    }
+
+    #[test]
+    fn erasing_the_whole_display() {
+        let out = shown("aaaa\x1b[2J");
+        assert_eq!(out, vec!["", "", ""]);
+    }
+
+    #[test]
+    fn erasing_to_the_end_of_a_line() {
+        let out = shown("abcdefgh\x1b[1;3H\x1b[K");
+        assert_eq!(out[0], "ab");
+    }
+
+    #[test]
+    fn erasing_to_the_start_of_a_line() {
+        let out = shown("abcdefgh\x1b[1;3H\x1b[1K");
+        assert_eq!(out[0], "   defgh");
+    }
+
+    #[test]
+    fn erasing_characters_leaves_the_rest_in_place() {
+        let out = shown("abcdefgh\x1b[1;2H\x1b[2X");
+        assert_eq!(out[0], "a  defgh");
+    }
+
+    #[test]
+    fn inserting_and_deleting_characters_shift_the_line() {
+        assert_eq!(shown("abcdefgh\x1b[1;3H\x1b[2@")[0], "ab  cdef");
+        assert_eq!(shown("abcdefgh\x1b[1;3H\x1b[2P")[0], "abefgh");
+    }
+
+    #[test]
+    fn inserting_and_deleting_lines_scroll_the_region() {
+        assert_eq!(
+            shown("a\r\nb\r\nc\x1b[1;1H\x1b[L"),
+            vec!["", "a", "b"]
+        );
+        assert_eq!(
+            shown("a\r\nb\r\nc\x1b[1;1H\x1b[M"),
+            vec!["b", "c", ""]
+        );
+    }
+
+    #[test]
+    fn scrolling_the_region() {
+        assert_eq!(shown("a\r\nb\r\nc\x1b[S"), vec!["b", "c", ""]);
+        assert_eq!(shown("a\r\nb\r\nc\x1b[T"), vec!["", "a", "b"]);
     }
 }

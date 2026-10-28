@@ -354,3 +354,37 @@ mod tests {
         assert!(!grid.any_dirty());
     }
 }
+
+impl Grid {
+    /// Opens a gap of `count` cells at (`x`, `y`), shifting the rest right.
+    pub fn insert_cells(&mut self, y: u16, x: u16, count: u16, pen: Pen) {
+        if y >= self.rows || x >= self.cols || count == 0 {
+            return;
+        }
+        let cols = self.cols;
+        let count = count.min(cols - x);
+        let blank = Cell::blank(pen);
+        let mut row: Vec<Cell> = self.row(y).to_vec();
+        for i in 0..count {
+            row.insert(usize::from(x + i), blank);
+        }
+        row.truncate(usize::from(cols));
+        self.row_mut(y).copy_from_slice(&row);
+    }
+
+    /// Removes `count` cells at (`x`, `y`), shifting the rest left.
+    pub fn delete_cells(&mut self, y: u16, x: u16, count: u16, pen: Pen) {
+        if y >= self.rows || x >= self.cols || count == 0 {
+            return;
+        }
+        let cols = self.cols;
+        let count = count.min(cols - x);
+        let blank = Cell::blank(pen);
+        let mut row: Vec<Cell> = self.row(y).to_vec();
+        for _ in 0..count {
+            row.remove(usize::from(x));
+        }
+        row.resize(usize::from(cols), blank);
+        self.row_mut(y).copy_from_slice(&row);
+    }
+}

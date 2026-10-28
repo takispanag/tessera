@@ -183,6 +183,59 @@ impl Screen {
         self.cursor.y = y.clamp(0, i32::from(self.rows()) - 1) as u16;
         self.wrap_pending = false;
     }
+
+    /// Erases `n` characters from the cursor without moving anything.
+    pub(crate) fn erase_chars(&mut self, n: u16) {
+        let (x, y) = (self.cursor.x, self.cursor.y);
+        let last = x.saturating_add(n).saturating_sub(1);
+        self.grid.erase_cells(y, x, last, Pen::default());
+    }
+
+    /// Opens a gap of `n` characters at the cursor.
+    pub(crate) fn insert_chars(&mut self, n: u16) {
+        let (x, y) = (self.cursor.x, self.cursor.y);
+        self.grid.insert_cells(y, x, n, Pen::default());
+    }
+
+    /// Removes `n` characters at the cursor, pulling the rest left.
+    pub(crate) fn delete_chars(&mut self, n: u16) {
+        let (x, y) = (self.cursor.x, self.cursor.y);
+        self.grid.delete_cells(y, x, n, Pen::default());
+    }
+
+    /// Inserts `n` blank lines at the cursor, inside the scroll region.
+    pub(crate) fn insert_lines(&mut self, n: u16) {
+        if self.cursor.y < self.scroll_top || self.cursor.y > self.scroll_bottom {
+            return;
+        }
+        self.grid
+            .scroll_down(self.cursor.y, self.scroll_bottom, n, Pen::default());
+        self.cursor.x = 0;
+        self.wrap_pending = false;
+    }
+
+    /// Deletes `n` lines at the cursor, pulling the rest of the region up.
+    pub(crate) fn delete_lines(&mut self, n: u16) {
+        if self.cursor.y < self.scroll_top || self.cursor.y > self.scroll_bottom {
+            return;
+        }
+        self.grid
+            .scroll_up(self.cursor.y, self.scroll_bottom, n, Pen::default());
+        self.cursor.x = 0;
+        self.wrap_pending = false;
+    }
+
+    /// Scrolls the scroll region up by `n` lines.
+    pub(crate) fn scroll_up(&mut self, n: u16) {
+        self.grid
+            .scroll_up(self.scroll_top, self.scroll_bottom, n, Pen::default());
+    }
+
+    /// Scrolls the scroll region down by `n` lines.
+    pub(crate) fn scroll_down(&mut self, n: u16) {
+        self.grid
+            .scroll_down(self.scroll_top, self.scroll_bottom, n, Pen::default());
+    }
 }
 
 /// The number of columns a character occupies.
