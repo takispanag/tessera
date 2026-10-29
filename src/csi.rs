@@ -37,6 +37,8 @@ pub(crate) fn dispatch(screen: &mut Screen, csi: Csi) {
             let col = i32::from(csi.param(1, 1));
             screen.move_to(col - 1, row - 1);
         }
+        // Select graphic rendition: colour and attributes.
+        'm' => crate::sgr::apply(&mut screen.pen, &csi.params),
         // Erase in display: 0 to the end, 1 from the start, 2 the whole screen.
         'J' => erase_in_display(screen, csi.param(0, 0)),
         // Erase in line: 0 to the end, 1 from the start, 2 the whole line.

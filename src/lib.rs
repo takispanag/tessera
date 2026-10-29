@@ -1,4 +1,4 @@
-﻿//! Tessera β€” a terminal emulator engine written from scratch.
+﻿//! Tessera — a terminal emulator engine written from scratch.
 //!
 //! A terminal is a small program with a large specification: a byte stream
 //! arrives, escape sequences are parsed out of it, and the result is a grid of
@@ -18,6 +18,7 @@
 pub mod cell;
 pub mod grid;
 mod csi;
+mod sgr;
 pub mod parser;
 pub mod screen;
 

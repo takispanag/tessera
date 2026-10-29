@@ -2,8 +2,8 @@
 //!
 //! This is the layer that knows the specification. The parser hands it one
 //! action at a time; the grid stores the result. Everything a program can do to
-//! a terminal β€” printing, moving, erasing, scrolling, setting attributes,
-//! switching to the alternate screen β€” is a method here.
+//! a terminal — printing, moving, erasing, scrolling, setting attributes,
+//! switching to the alternate screen — is a method here.
 
 use crate::cell::{Cell, Pen};
 use crate::grid::Grid;
