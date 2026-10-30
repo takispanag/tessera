@@ -37,6 +37,16 @@ pub(crate) fn dispatch(screen: &mut Screen, csi: Csi) {
             let col = i32::from(csi.param(1, 1));
             screen.move_to(col - 1, row - 1);
         }
+        // Scroll region, from one-based rows with the bottom defaulting to the
+        // last row. Setting it homes the cursor.
+        'r' => {
+            let bottom = csi.param(1, u16::MAX);
+            let bottom = if bottom == u16::MAX { screen.rows() } else { bottom };
+            screen.set_scroll_region(csi.param(0, 1), bottom);
+        }
+        // Save and restore the cursor and the pen.
+        's' => screen.save_cursor(),
+        'u' => screen.restore_cursor(),
         // Select graphic rendition: colour and attributes.
         'm' => crate::sgr::apply(&mut screen.pen, &csi.params),
         // Erase in display: 0 to the end, 1 from the start, 2 the whole screen.

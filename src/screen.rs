@@ -32,6 +32,8 @@ pub struct Screen {
     pub(crate) scroll_bottom: u16,
     pub(crate) autowrap: bool,
     pub(crate) wrap_pending: bool,
+    pub(crate) origin_mode: bool,
+    saved_cursor: Option<(Point, Pen)>,
 }
 
 impl Screen {
@@ -48,6 +50,8 @@ impl Screen {
             scroll_bottom: rows - 1,
             autowrap: true,
             wrap_pending: false,
+            origin_mode: false,
+            saved_cursor: None,
         }
     }
 
@@ -69,6 +73,54 @@ impl Screen {
     /// The current pen.
     pub fn pen(&self) -> Pen {
         self.pen
+    }
+
+    /// The scroll region as inclusive zero-based rows.
+    pub fn scroll_region(&self) -> (u16, u16) {
+        (self.scroll_top, self.scroll_bottom)
+    }
+
+    /// Sets the scroll region from inclusive, one-based rows.
+    ///
+    /// A region that is degenerate — either end outside the screen, or the top
+    /// at or below the bottom — is ignored, which is what xterm does rather
+    /// than leaving the screen in a state where scrolling cannot happen.
+    pub(crate) fn set_scroll_region(&mut self, top: u16, bottom: u16) {
+        if top == 0 || bottom == 0 {
+            return;
+        }
+        let top = top - 1;
+        let bottom = bottom.min(self.rows()) - 1;
+        if top >= bottom || bottom >= self.rows() {
+            return;
+        }
+        self.scroll_top = top;
+        self.scroll_bottom = bottom;
+        self.move_to(0, 0);
+    }
+
+    /// The cursor moves up one line, scrolling the region down at the top.
+    fn reverse_index(&mut self) {
+        if self.cursor.y == self.scroll_top {
+            self.grid
+                .scroll_down(self.scroll_top, self.scroll_bottom, 1, Pen::default());
+        } else {
+            self.cursor.y = self.cursor.y.saturating_sub(1);
+        }
+    }
+
+    /// Remembers the cursor and the pen.
+    pub(crate) fn save_cursor(&mut self) {
+        self.saved_cursor = Some((self.cursor, self.pen));
+    }
+
+    /// Restores the cursor and the pen, if anything was saved.
+    pub(crate) fn restore_cursor(&mut self) {
+        if let Some((point, pen)) = self.saved_cursor {
+            self.cursor = point;
+            self.pen = pen;
+            self.wrap_pending = false;
+        }
     }
 
     /// The grid, for reading cells back.
@@ -102,9 +154,45 @@ impl Screen {
             Action::Print(c) => self.print(c),
             Action::Execute(c) => self.control(c),
             Action::Csi(csi) => self.csi(csi),
-            Action::Esc(_) => {}
+            Action::Esc(c) => self.escape(c),
             Action::Osc(_) => {}
         }
+    }
+
+    /// Handles the simple escape sequences.
+    fn escape(&mut self, c: char) {
+        match c {
+            'D' => {
+                self.wrap_pending = false;
+                self.index();
+            }
+            'E' => {
+                self.cursor.x = 0;
+                self.wrap_pending = false;
+                self.index();
+            }
+            'M' => {
+                self.wrap_pending = false;
+                self.reverse_index();
+            }
+            '7' => self.save_cursor(),
+            '8' => self.restore_cursor(),
+            'c' => self.reset(),
+            _ => {}
+        }
+    }
+
+    /// Returns the screen to its power-on state without changing its size.
+    pub fn reset(&mut self) {
+        self.grid.clear();
+        self.cursor = Point::default();
+        self.pen = Pen::default();
+        self.scroll_top = 0;
+        self.scroll_bottom = self.rows() - 1;
+        self.autowrap = true;
+        self.wrap_pending = false;
+        self.origin_mode = false;
+        self.saved_cursor = None;
     }
 
     fn print(&mut self, c: char) {
@@ -332,5 +420,94 @@ mod tests {
         let screen = Screen::new(0, 0);
         assert_eq!(screen.cols(), 1);
         assert_eq!(screen.rows(), 1);
+    }
+}
+
+#[cfg(test)]
+mod region_tests {
+    use crate::screen::Screen;
+
+    #[test]
+    fn the_scroll_region_defaults_to_the_whole_screen() {
+        let screen = Screen::new(4, 5);
+        assert_eq!(screen.scroll_region(), (0, 4));
+    }
+
+    #[test]
+    fn setting_the_region_homes_the_cursor() {
+        let mut screen = Screen::new(6, 6);
+        screen.feed("abc\x1b[4;2H\x1b[2;4r");
+        assert_eq!(screen.scroll_region(), (1, 3));
+        assert_eq!(screen.cursor(), crate::screen::Point::new(0, 0));
+    }
+
+    #[test]
+    fn a_degenerate_region_is_ignored() {
+        let mut screen = Screen::new(6, 6);
+        screen.feed("\x1b[4;2r");
+        assert_eq!(screen.scroll_region(), (0, 5));
+        screen.feed("\x1b[9;9r");
+        assert_eq!(screen.scroll_region(), (0, 5));
+    }
+
+    #[test]
+    fn line_feed_scrolls_only_the_region() {
+        let mut screen = Screen::new(3, 5);
+        screen.feed("a\r\nb\r\nc\r\nd\r\ne");
+        // Rows 2 to 4 in one-based terms: the middle three rows scroll.
+        screen.feed("\x1b[2;4r");
+        screen.feed("\x1b[4;1H\n");
+        assert_eq!(screen.line(0), "a");
+        assert_eq!(screen.line(1), "c");
+        assert_eq!(screen.line(2), "d");
+        assert_eq!(screen.line(3), "");
+        assert_eq!(screen.line(4), "e");
+    }
+
+    #[test]
+    fn reverse_index_scrolls_down_at_the_top_of_the_region() {
+        let mut screen = Screen::new(3, 4);
+        screen.feed("a\r\nb\r\nc\r\nd");
+        screen.feed("\x1b[2;3r\x1b[2;1H");
+        screen.feed("\x1bM");
+        assert_eq!(screen.line(0), "a");
+        assert_eq!(screen.line(1), "");
+        assert_eq!(screen.line(2), "b");
+        assert_eq!(screen.line(3), "d");
+    }
+
+    #[test]
+    fn next_line_resets_the_column() {
+        let mut screen = Screen::new(6, 3);
+        screen.feed("abc\x1bE");
+        assert_eq!(screen.cursor(), crate::screen::Point::new(0, 1));
+    }
+
+    #[test]
+    fn saving_and_restoring_restores_the_pen_too() {
+        let mut screen = Screen::new(6, 3);
+        screen.feed("\x1b[31m\x1b7");
+        screen.feed("\x1b[0m\x1b[3;4H");
+        assert_eq!(screen.cursor(), crate::screen::Point::new(3, 2));
+        screen.feed("\x1b8");
+        assert_eq!(screen.cursor(), crate::screen::Point::new(0, 0));
+        assert_eq!(screen.pen().fg, crate::cell::Color::Indexed(1));
+    }
+
+    #[test]
+    fn the_csi_form_saves_and_restores_the_same_way() {
+        let mut screen = Screen::new(6, 3);
+        screen.feed("\x1b[3;4H\x1b[s\x1b[1;1H\x1b[u");
+        assert_eq!(screen.cursor(), crate::screen::Point::new(3, 2));
+    }
+
+    #[test]
+    fn a_full_reset_clears_everything() {
+        let mut screen = Screen::new(5, 3);
+        screen.feed("\x1b[31mabc\x1b[2;5r\x1bc");
+        assert_eq!(screen.line(0), "");
+        assert_eq!(screen.scroll_region(), (0, 2));
+        assert_eq!(screen.pen(), crate::cell::Pen::default());
+        assert_eq!(screen.cursor(), crate::screen::Point::new(0, 0));
     }
 }
