@@ -10,7 +10,15 @@ use crate::screen::Screen;
 
 /// Applies a control sequence to the screen.
 pub(crate) fn dispatch(screen: &mut Screen, csi: Csi) {
-    // Private sequences belong to the mode group, which is handled later.
+    // Modes are the one group that reads the private marker.
+    if let Some('?') = csi.private {
+        match csi.final_byte {
+            'h' => set_modes(screen, &csi, true),
+            'l' => set_modes(screen, &csi, false),
+            _ => {}
+        }
+        return;
+    }
     if csi.private.is_some() || csi.intermediate.is_some() {
         return;
     }
@@ -30,13 +38,21 @@ pub(crate) fn dispatch(screen: &mut Screen, csi: Csi) {
         'F' => screen.move_to(0, y - n),
         // Absolute column and absolute row.
         'G' | '`' => screen.move_to(n - 1, y),
-        'd' => screen.move_to(x, n - 1),
-        // Cursor position, row first.
+        'd' => {
+            let base = screen.origin_base();
+            screen.move_to(x, base + n - 1);
+        }
+        // Cursor position, row first, counted from the origin.
         'H' | 'f' => {
+            let base = screen.origin_base();
             let row = i32::from(csi.param(0, 1));
             let col = i32::from(csi.param(1, 1));
-            screen.move_to(col - 1, row - 1);
+            screen.move_to(col - 1, base + row - 1);
         }
+        // Tab stops.
+        'I' => screen.tab_forward(csi.param(0, 1)),
+        'Z' => screen.tab_backward(csi.param(0, 1)),
+        'g' => screen.clear_tab_stops(csi.param(0, 0)),
         // Scroll region, from one-based rows with the bottom defaulting to the
         // last row. Setting it homes the cursor.
         'r' => {
@@ -63,6 +79,14 @@ pub(crate) fn dispatch(screen: &mut Screen, csi: Csi) {
         'S' => screen.scroll_up(csi.param(0, 1)),
         'T' => screen.scroll_down(csi.param(0, 1)),
         _ => {}
+    }
+}
+
+fn set_modes(screen: &mut Screen, csi: &Csi, enable: bool) {
+    for param in &csi.params {
+        if let Some(mode) = param {
+            screen.set_mode(*mode, enable);
+        }
     }
 }
 

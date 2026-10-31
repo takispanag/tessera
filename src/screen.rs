@@ -33,6 +33,8 @@ pub struct Screen {
     pub(crate) autowrap: bool,
     pub(crate) wrap_pending: bool,
     pub(crate) origin_mode: bool,
+    pub(crate) cursor_visible: bool,
+    pub(crate) tabs: Vec<bool>,
     saved_cursor: Option<(Point, Pen)>,
 }
 
@@ -51,6 +53,8 @@ impl Screen {
             autowrap: true,
             wrap_pending: false,
             origin_mode: false,
+            cursor_visible: true,
+            tabs: default_tabs(cols),
             saved_cursor: None,
         }
     }
@@ -177,6 +181,7 @@ impl Screen {
             }
             '7' => self.save_cursor(),
             '8' => self.restore_cursor(),
+            'H' => self.set_tab_stop(),
             'c' => self.reset(),
             _ => {}
         }
@@ -192,6 +197,8 @@ impl Screen {
         self.autowrap = true;
         self.wrap_pending = false;
         self.origin_mode = false;
+        self.cursor_visible = true;
+        self.tabs = default_tabs(self.cols());
         self.saved_cursor = None;
     }
 
@@ -253,9 +260,7 @@ impl Screen {
                 self.wrap_pending = false;
             }
             '\t' => {
-                self.wrap_pending = false;
-                let next = (self.cursor.x / 8 + 1) * 8;
-                self.cursor.x = next.min(self.cols() - 1);
+                self.tab_forward(1);
             }
             _ => {}
         }
@@ -265,11 +270,100 @@ impl Screen {
         crate::csi::dispatch(self, csi);
     }
 
-    /// Moves the cursor, clamping it to the screen.
+    /// Moves the cursor, clamping it to the screen or to the scroll region when
+    /// origin mode is set.
     pub(crate) fn move_to(&mut self, x: i32, y: i32) {
+        let (min_y, max_y) = if self.origin_mode {
+            (i32::from(self.scroll_top), i32::from(self.scroll_bottom))
+        } else {
+            (0, i32::from(self.rows()) - 1)
+        };
         self.cursor.x = x.clamp(0, i32::from(self.cols()) - 1) as u16;
-        self.cursor.y = y.clamp(0, i32::from(self.rows()) - 1) as u16;
+        self.cursor.y = y.clamp(min_y, max_y) as u16;
         self.wrap_pending = false;
+    }
+
+    /// The row that counts as row 1 for absolute addressing.
+    pub(crate) fn origin_base(&self) -> i32 {
+        if self.origin_mode {
+            i32::from(self.scroll_top)
+        } else {
+            0
+        }
+    }
+
+    /// Moves the cursor forward to the `n`th next tab stop.
+    pub(crate) fn tab_forward(&mut self, n: u16) {
+        for _ in 0..n {
+            let mut x = self.cursor.x + 1;
+            while x < self.cols() && !self.tabs.get(usize::from(x)).copied().unwrap_or(false) {
+                x += 1;
+            }
+            self.cursor.x = x.min(self.cols().saturating_sub(1));
+        }
+        self.wrap_pending = false;
+    }
+
+    /// Moves the cursor back to the `n`th previous tab stop.
+    pub(crate) fn tab_backward(&mut self, n: u16) {
+        for _ in 0..n {
+            if self.cursor.x == 0 {
+                break;
+            }
+            let mut x = self.cursor.x - 1;
+            while x > 0 && !self.tabs.get(usize::from(x)).copied().unwrap_or(false) {
+                x -= 1;
+            }
+            self.cursor.x = x;
+        }
+        self.wrap_pending = false;
+    }
+
+    /// Sets a tab stop at the cursor.
+    pub(crate) fn set_tab_stop(&mut self) {
+        if let Some(stop) = self.tabs.get_mut(usize::from(self.cursor.x)) {
+            *stop = true;
+        }
+    }
+
+    /// Clears the tab stop at the cursor, or all of them.
+    pub(crate) fn clear_tab_stops(&mut self, mode: u16) {
+        match mode {
+            3 => self.tabs.iter_mut().for_each(|stop| *stop = false),
+            _ => {
+                if let Some(stop) = self.tabs.get_mut(usize::from(self.cursor.x)) {
+                    *stop = false;
+                }
+            }
+        }
+    }
+
+    /// Whether the cursor is shown.
+    pub fn cursor_visible(&self) -> bool {
+        self.cursor_visible
+    }
+
+    /// Whether a line wraps at the right margin.
+    pub fn autowrap(&self) -> bool {
+        self.autowrap
+    }
+
+    /// Whether the cursor is addressed relative to the scroll region.
+    pub fn origin_mode(&self) -> bool {
+        self.origin_mode
+    }
+
+    /// Sets or clears a DEC private mode.
+    pub(crate) fn set_mode(&mut self, mode: u16, enable: bool) {
+        match mode {
+            6 => {
+                self.origin_mode = enable;
+                self.move_to(0, 0);
+            }
+            7 => self.autowrap = enable,
+            25 => self.cursor_visible = enable,
+            _ => {}
+        }
     }
 
     /// Erases `n` characters from the cursor without moving anything.
@@ -324,6 +418,11 @@ impl Screen {
         self.grid
             .scroll_down(self.scroll_top, self.scroll_bottom, n, Pen::default());
     }
+}
+
+/// The default tab stops: every eight columns.
+fn default_tabs(cols: u16) -> Vec<bool> {
+    (0..cols).map(|x| x % 8 == 0).collect()
 }
 
 /// The number of columns a character occupies.
@@ -509,5 +608,84 @@ mod region_tests {
         assert_eq!(screen.scroll_region(), (0, 2));
         assert_eq!(screen.pen(), crate::cell::Pen::default());
         assert_eq!(screen.cursor(), crate::screen::Point::new(0, 0));
+    }
+}
+
+#[cfg(test)]
+mod mode_tests {
+    use crate::screen::{Point, Screen};
+
+    #[test]
+    fn autowrap_can_be_turned_off() {
+        let mut screen = Screen::new(4, 2);
+        screen.feed("\x1b[?7l");
+        screen.feed("abcdef");
+        assert!(!screen.autowrap());
+        assert_eq!(screen.line(0), "abcf");
+        assert_eq!(screen.line(1), "");
+    }
+
+    #[test]
+    fn the_cursor_can_be_hidden() {
+        let mut screen = Screen::new(4, 1);
+        assert!(screen.cursor_visible());
+        screen.feed("\x1b[?25l");
+        assert!(!screen.cursor_visible());
+        screen.feed("\x1b[?25h");
+        assert!(screen.cursor_visible());
+    }
+
+    #[test]
+    fn origin_mode_addresses_from_the_scroll_region() {
+        let mut screen = Screen::new(6, 6);
+        screen.feed("\x1b[3;5r\x1b[?6h\x1b[1;1H");
+        assert!(screen.origin_mode());
+        assert_eq!(screen.cursor(), Point::new(0, 2));
+        screen.feed("\x1b[2;1H");
+        assert_eq!(screen.cursor(), Point::new(0, 3));
+    }
+
+    #[test]
+    fn origin_mode_clamps_to_the_region() {
+        let mut screen = Screen::new(6, 6);
+        screen.feed("\x1b[3;5r\x1b[?6h\x1b[9;1H");
+        assert_eq!(screen.cursor(), Point::new(0, 4));
+    }
+
+    #[test]
+    fn tabs_stop_every_eight_columns() {
+        let mut screen = Screen::new(30, 1);
+        screen.feed("\tX");
+        assert_eq!(screen.cursor().x, 9);
+        assert_eq!(screen.line(0), "        X");
+    }
+
+    #[test]
+    fn a_tab_stop_can_be_set_and_cleared() {
+        let mut screen = Screen::new(12, 1);
+        screen.feed("\x1b[1;4H\x1bH");
+        screen.feed("\x1b[1;1H\t");
+        assert_eq!(screen.cursor().x, 3);
+        // Clear the stop that was just set, then tab again.
+        screen.feed("\x1b[1;4H\x1b[g\x1b[1;1H\t");
+        assert_eq!(screen.cursor().x, 8);
+    }
+
+    #[test]
+    fn clearing_all_tab_stops_sends_the_cursor_to_the_margin() {
+        let mut screen = Screen::new(12, 1);
+        screen.feed("\x1b[3g\t");
+        assert_eq!(screen.cursor().x, 11);
+    }
+
+    #[test]
+    fn forward_and_backward_tab_counts() {
+        let mut screen = Screen::new(30, 1);
+        screen.feed("\x1b[2I");
+        assert_eq!(screen.cursor().x, 16);
+        screen.feed("\x1b[Z");
+        assert_eq!(screen.cursor().x, 8);
+        screen.feed("\x1b[Z");
+        assert_eq!(screen.cursor().x, 0);
     }
 }
