@@ -8,6 +8,7 @@
 use crate::cell::{Cell, Pen};
 use crate::grid::Grid;
 use crate::parser::{Action, Csi, Parser};
+use std::collections::VecDeque;
 
 /// A position on the screen, counted from the top-left corner.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -35,6 +36,9 @@ pub struct Screen {
     pub(crate) origin_mode: bool,
     pub(crate) cursor_visible: bool,
     pub(crate) tabs: Vec<bool>,
+    alt: Option<Grid>,
+    scrollback: VecDeque<Vec<Cell>>,
+    max_scrollback: usize,
     saved_cursor: Option<(Point, Pen)>,
 }
 
@@ -55,6 +59,9 @@ impl Screen {
             origin_mode: false,
             cursor_visible: true,
             tabs: default_tabs(cols),
+            alt: None,
+            scrollback: VecDeque::new(),
+            max_scrollback: 1000,
             saved_cursor: None,
         }
     }
@@ -199,7 +206,28 @@ impl Screen {
         self.origin_mode = false;
         self.cursor_visible = true;
         self.tabs = default_tabs(self.cols());
+        self.alt = None;
+        self.scrollback.clear();
         self.saved_cursor = None;
+    }
+
+    /// Resizes the screen, and the alternate screen with it.
+    pub fn resize(&mut self, cols: u16, rows: u16) {
+        let cols = cols.max(1);
+        let rows = rows.max(1);
+        if cols == self.cols() && rows == self.rows() {
+            return;
+        }
+        self.grid.resize(cols, rows);
+        if let Some(alt) = self.alt.as_mut() {
+            alt.resize(cols, rows);
+        }
+        self.tabs = default_tabs(cols);
+        self.scroll_top = 0;
+        self.scroll_bottom = rows - 1;
+        self.cursor.x = self.cursor.x.min(cols - 1);
+        self.cursor.y = self.cursor.y.min(rows - 1);
+        self.wrap_pending = false;
     }
 
     fn print(&mut self, c: char) {
@@ -234,12 +262,17 @@ impl Screen {
     /// Moves the cursor down one line, scrolling the region at the bottom.
     fn index(&mut self) {
         if self.cursor.y == self.scroll_bottom {
-            self.grid.scroll_up(
-                self.scroll_top,
-                self.scroll_bottom,
-                1,
-                Pen::default(),
-            );
+            // Lines that leave the top of the main screen go to scrollback.
+            let whole_screen = self.scroll_top == 0 && self.scroll_bottom == self.rows() - 1;
+            if whole_screen && self.alt.is_none() && self.max_scrollback > 0 {
+                let row = self.grid.row(self.scroll_top).to_vec();
+                self.scrollback.push_back(row);
+                while self.scrollback.len() > self.max_scrollback {
+                    self.scrollback.pop_front();
+                }
+            }
+            self.grid
+                .scroll_up(self.scroll_top, self.scroll_bottom, 1, Pen::default());
         } else if self.cursor.y + 1 < self.rows() {
             self.cursor.y += 1;
         }
@@ -362,8 +395,77 @@ impl Screen {
             }
             7 => self.autowrap = enable,
             25 => self.cursor_visible = enable,
+            // Alternate screen. 1049 is the one programs actually use: it
+            // saves the cursor, switches, and clears the alternate buffer.
+            47 | 1047 => {
+                if enable {
+                    self.enter_alt(false);
+                } else {
+                    self.leave_alt();
+                }
+            }
+            1048 => {
+                if enable {
+                    self.save_cursor();
+                } else {
+                    self.restore_cursor();
+                }
+            }
+            1049 => {
+                if enable {
+                    self.save_cursor();
+                    self.enter_alt(true);
+                } else {
+                    self.leave_alt();
+                    self.restore_cursor();
+                }
+            }
             _ => {}
         }
+    }
+
+    /// Switches to the alternate screen, keeping the main one.
+    pub(crate) fn enter_alt(&mut self, clear: bool) {
+        if self.alt.is_some() {
+            return;
+        }
+        let mut alt = Grid::new(self.cols(), self.rows());
+        if !clear {
+            alt.clear();
+        }
+        self.alt = Some(std::mem::replace(&mut self.grid, alt));
+        self.cursor = Point::default();
+        self.wrap_pending = false;
+    }
+
+    /// Switches back to the main screen.
+    pub(crate) fn leave_alt(&mut self) {
+        if let Some(main) = self.alt.take() {
+            self.grid = main;
+            self.wrap_pending = false;
+        }
+    }
+
+    /// Whether the alternate screen is showing.
+    pub fn on_alternate_screen(&self) -> bool {
+        self.alt.is_some()
+    }
+
+    /// The lines that have scrolled off the top of the main screen.
+    pub fn scrollback(&self) -> &VecDeque<Vec<Cell>> {
+        &self.scrollback
+    }
+
+    /// One scrollback line as text, oldest first.
+    pub fn scrollback_line(&self, index: usize) -> Option<String> {
+        self.scrollback.get(index).map(|row| {
+            row.iter()
+                .filter(|cell| !cell.is_continuation())
+                .map(|cell| cell.ch)
+                .collect::<String>()
+                .trim_end()
+                .to_string()
+        })
     }
 
     /// Erases `n` characters from the cursor without moving anything.
@@ -687,5 +789,76 @@ mod mode_tests {
         assert_eq!(screen.cursor().x, 8);
         screen.feed("\x1b[Z");
         assert_eq!(screen.cursor().x, 0);
+    }
+}
+
+#[cfg(test)]
+mod buffer_tests {
+    use crate::screen::Screen;
+
+    #[test]
+    fn the_alternate_screen_hides_the_main_one() {
+        let mut screen = Screen::new(10, 3);
+        screen.feed("main");
+        screen.feed("\x1b[?1049h");
+        assert!(screen.on_alternate_screen());
+        assert_eq!(screen.line(0), "");
+        screen.feed("alt");
+        assert_eq!(screen.line(0), "alt");
+        screen.feed("\x1b[?1049l");
+        assert!(!screen.on_alternate_screen());
+        assert_eq!(screen.line(0), "main");
+    }
+
+    #[test]
+    fn leaving_the_alternate_screen_restores_the_cursor() {
+        let mut screen = Screen::new(10, 4);
+        screen.feed("\x1b[3;4H");
+        screen.feed("\x1b[?1049h\x1b[1;1H");
+        screen.feed("\x1b[?1049l");
+        assert_eq!(screen.cursor(), crate::screen::Point::new(3, 2));
+    }
+
+    #[test]
+    fn the_alternate_screen_does_not_write_to_scrollback() {
+        let mut screen = Screen::new(4, 2);
+        screen.feed("\x1b[?1049h");
+        for _ in 0..10 {
+            screen.feed("x\r\n");
+        }
+        assert_eq!(screen.scrollback().len(), 0);
+    }
+
+    #[test]
+    fn lines_that_leave_the_main_screen_are_kept() {
+        let mut screen = Screen::new(4, 2);
+        for i in 0..5 {
+            screen.feed(&format!("l{i}\r\n"));
+        }
+        assert_eq!(screen.scrollback().len(), 4);
+        assert_eq!(screen.scrollback_line(0).as_deref(), Some("l0"));
+        assert_eq!(screen.scrollback_line(3).as_deref(), Some("l3"));
+    }
+
+    #[test]
+    fn scrollback_is_bounded() {
+        let mut screen = Screen::new(4, 1);
+        for i in 0..1200 {
+            let _ = i;
+            screen.feed("x\r\n");
+        }
+        assert_eq!(screen.scrollback().len(), 1000);
+    }
+
+    #[test]
+    fn resizing_takes_the_alternate_screen_with_it() {
+        let mut screen = Screen::new(4, 2);
+        screen.feed("\x1b[?1049h");
+        screen.resize(6, 3);
+        assert_eq!(screen.cols(), 6);
+        assert_eq!(screen.rows(), 3);
+        screen.feed("\x1b[?1049l");
+        assert_eq!(screen.cols(), 6);
+        assert_eq!(screen.rows(), 3);
     }
 }
