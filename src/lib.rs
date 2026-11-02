@@ -16,13 +16,16 @@
 //! interesting part testable without a display.
 
 pub mod cell;
+pub mod dump;
 pub mod grid;
 mod csi;
 mod sgr;
 pub mod parser;
+pub mod recording;
 pub mod screen;
 
 pub use cell::{Attributes, Cell, Color, Pen};
+pub use dump::dump;
 pub use grid::Grid;
 pub use parser::{Action, Csi, Parser};
 pub use screen::{Point, Screen};
