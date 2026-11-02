@@ -40,6 +40,7 @@ pub struct Screen {
     scrollback: VecDeque<Vec<Cell>>,
     max_scrollback: usize,
     saved_cursor: Option<(Point, Pen)>,
+    title: String,
 }
 
 impl Screen {
@@ -63,6 +64,7 @@ impl Screen {
             scrollback: VecDeque::new(),
             max_scrollback: 1000,
             saved_cursor: None,
+            title: String::new(),
         }
     }
 
@@ -166,8 +168,28 @@ impl Screen {
             Action::Execute(c) => self.control(c),
             Action::Csi(csi) => self.csi(csi),
             Action::Esc(c) => self.escape(c),
-            Action::Osc(_) => {}
+            Action::Osc(s) => self.osc(&s),
         }
+    }
+
+    /// Handles an operating-system command.
+    ///
+    /// Only the window-title commands are implemented; the rest are ignored
+    /// rather than guessed at. The title is bounded because it arrives from the
+    /// far end of a pipe and would otherwise grow without limit.
+    fn osc(&mut self, payload: &str) {
+        let Some((code, text)) = payload.split_once(';') else {
+            return;
+        };
+        if code == "0" || code == "2" {
+            let text: String = text.chars().take(MAX_TITLE).collect();
+            self.title = text;
+        }
+    }
+
+    /// The window title last set by the program, if any.
+    pub fn title(&self) -> &str {
+        &self.title
     }
 
     /// Handles the simple escape sequences.
@@ -527,6 +549,9 @@ fn default_tabs(cols: u16) -> Vec<bool> {
     (0..cols).map(|x| x % 8 == 0).collect()
 }
 
+/// The longest title the engine will keep from an OSC sequence.
+const MAX_TITLE: usize = 512;
+
 /// The number of columns a character occupies.
 ///
 /// A minimal width table for now: the full Unicode east-asian width data
@@ -860,5 +885,47 @@ mod buffer_tests {
         screen.feed("\x1b[?1049l");
         assert_eq!(screen.cols(), 6);
         assert_eq!(screen.rows(), 3);
+    }
+}
+
+#[cfg(test)]
+mod osc_tests {
+    use crate::screen::Screen;
+
+    #[test]
+    fn the_window_title_is_read_from_osc_0_and_2() {
+        let mut screen = Screen::new(4, 2);
+        screen.feed("\x1b]0;first\x07");
+        assert_eq!(screen.title(), "first");
+        screen.feed("\x1b]2;second\x1b\\");
+        assert_eq!(screen.title(), "second");
+    }
+
+    #[test]
+    fn a_title_with_semicolons_is_kept_whole() {
+        let mut screen = Screen::new(4, 2);
+        screen.feed("\x1b]0;a;b;c\x07");
+        assert_eq!(screen.title(), "a;b;c");
+    }
+
+    #[test]
+    fn unknown_commands_are_ignored() {
+        let mut screen = Screen::new(4, 2);
+        screen.feed("\x1b]8;;https://example.com\x07");
+        assert_eq!(screen.title(), "");
+    }
+
+    #[test]
+    fn a_malformed_command_does_not_break_the_stream() {
+        let mut screen = Screen::new(6, 2);
+        screen.feed("\x1b]0\x07ok");
+        assert_eq!(screen.line(0), "ok");
+    }
+
+    #[test]
+    fn the_title_is_bounded() {
+        let mut screen = Screen::new(4, 2);
+        screen.feed(&format!("\x1b]0;{}\x07", "x".repeat(5000)));
+        assert_eq!(screen.title().chars().count(), 512);
     }
 }
