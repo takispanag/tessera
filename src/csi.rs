@@ -57,7 +57,11 @@ pub(crate) fn dispatch(screen: &mut Screen, csi: Csi) {
         // last row. Setting it homes the cursor.
         'r' => {
             let bottom = csi.param(1, u16::MAX);
-            let bottom = if bottom == u16::MAX { screen.rows() } else { bottom };
+            let bottom = if bottom == u16::MAX {
+                screen.rows()
+            } else {
+                bottom
+            };
             screen.set_scroll_region(csi.param(0, 1), bottom);
         }
         // Save and restore the cursor and the pen.
@@ -83,10 +87,8 @@ pub(crate) fn dispatch(screen: &mut Screen, csi: Csi) {
 }
 
 fn set_modes(screen: &mut Screen, csi: &Csi, enable: bool) {
-    for param in &csi.params {
-        if let Some(mode) = param {
-            screen.set_mode(*mode, enable);
-        }
+    for mode in csi.params.iter().flatten() {
+        screen.set_mode(*mode, enable);
     }
 }
 
@@ -224,14 +226,8 @@ mod tests {
 
     #[test]
     fn inserting_and_deleting_lines_scroll_the_region() {
-        assert_eq!(
-            shown("a\r\nb\r\nc\x1b[1;1H\x1b[L"),
-            vec!["", "a", "b"]
-        );
-        assert_eq!(
-            shown("a\r\nb\r\nc\x1b[1;1H\x1b[M"),
-            vec!["b", "c", ""]
-        );
+        assert_eq!(shown("a\r\nb\r\nc\x1b[1;1H\x1b[L"), vec!["", "a", "b"]);
+        assert_eq!(shown("a\r\nb\r\nc\x1b[1;1H\x1b[M"), vec!["b", "c", ""]);
     }
 
     #[test]

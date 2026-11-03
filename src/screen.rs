@@ -1,4 +1,4 @@
-﻿//! The screen: the grid plus everything the escape stream can change.
+//! The screen: the grid plus everything the escape stream can change.
 //!
 //! This is the layer that knows the specification. The parser hands it one
 //! action at a time; the grid stores the result. Everything a program can do to
@@ -271,8 +271,11 @@ impl Screen {
         let cell = Cell::new(c, self.pen, width as u8);
         self.grid.set(self.cursor.x, self.cursor.y, cell);
         if width == 2 {
-            self.grid
-                .set(self.cursor.x + 1, self.cursor.y, Cell::continuation(self.pen));
+            self.grid.set(
+                self.cursor.x + 1,
+                self.cursor.y,
+                Cell::continuation(self.pen),
+            );
         }
         self.cursor.x += width;
         if self.cursor.x >= self.cols() {
@@ -557,11 +560,7 @@ const MAX_TITLE: usize = 512;
 /// A minimal width table for now: the full Unicode east-asian width data
 /// arrives with the wide-character support.
 fn char_width(c: char) -> u8 {
-    if c.is_control() {
-        0
-    } else {
-        1
-    }
+    if c.is_control() { 0 } else { 1 }
 }
 
 #[cfg(test)]

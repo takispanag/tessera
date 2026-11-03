@@ -1,4 +1,4 @@
-﻿//! The cell grid.
+//! The cell grid.
 //!
 //! The grid owns the rectangle of cells and nothing else: no cursor, no
 //! attributes, no rules about what a control sequence means. Keeping it that
@@ -21,7 +21,7 @@ pub struct Grid {
 }
 
 impl Grid {
-    /// A grid of `cols` Γ— `rows` blank cells.
+    /// A grid of `cols` Ξ“β€” `rows` blank cells.
     pub fn new(cols: u16, rows: u16) -> Self {
         Grid {
             cols,
@@ -53,7 +53,8 @@ impl Grid {
     /// A coordinate outside the grid reads as a blank cell rather than
     /// panicking, so a malformed escape sequence cannot take the engine down.
     pub fn cell(&self, x: u16, y: u16) -> Cell {
-        self.index(x, y).map_or_else(Cell::default, |i| self.cells[i])
+        self.index(x, y)
+            .map_or_else(Cell::default, |i| self.cells[i])
     }
 
     /// Writes `cell` at (`x`, `y`). Coordinates outside the grid are ignored.
@@ -152,7 +153,11 @@ impl Grid {
 
         for y in top..=bottom {
             let i = (y - top) as isize;
-            let src = if up { i + count as isize } else { i - count as isize };
+            let src = if up {
+                i + count as isize
+            } else {
+                i - count as isize
+            };
             for x in 0..cols {
                 let cell = if src < 0 || src >= height as isize {
                     Cell::blank(pen)
@@ -210,6 +215,39 @@ impl Grid {
     }
 }
 
+impl Grid {
+    /// Opens a gap of `count` cells at (`x`, `y`), shifting the rest right.
+    pub fn insert_cells(&mut self, y: u16, x: u16, count: u16, pen: Pen) {
+        if y >= self.rows || x >= self.cols || count == 0 {
+            return;
+        }
+        let cols = self.cols;
+        let count = count.min(cols - x);
+        let blank = Cell::blank(pen);
+        let mut row: Vec<Cell> = self.row(y).to_vec();
+        for i in 0..count {
+            row.insert(usize::from(x + i), blank);
+        }
+        row.truncate(usize::from(cols));
+        self.row_mut(y).copy_from_slice(&row);
+    }
+
+    /// Removes `count` cells at (`x`, `y`), shifting the rest left.
+    pub fn delete_cells(&mut self, y: u16, x: u16, count: u16, pen: Pen) {
+        if y >= self.rows || x >= self.cols || count == 0 {
+            return;
+        }
+        let cols = self.cols;
+        let count = count.min(cols - x);
+        let blank = Cell::blank(pen);
+        let mut row: Vec<Cell> = self.row(y).to_vec();
+        for _ in 0..count {
+            row.remove(usize::from(x));
+        }
+        row.resize(usize::from(cols), blank);
+        self.row_mut(y).copy_from_slice(&row);
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,8 +273,10 @@ mod tests {
     #[test]
     fn cells_round_trip() {
         let mut grid = Grid::new(3, 3);
-        let mut pen = Pen::default();
-        pen.fg = Color::Indexed(1);
+        let pen = Pen {
+            fg: Color::Indexed(1),
+            ..Pen::default()
+        };
         grid.set(2, 1, Cell::new('x', pen, 1));
         let cell = grid.cell(2, 1);
         assert_eq!(cell.ch, 'x');
@@ -291,7 +331,11 @@ mod tests {
     fn scrolling_up_moves_rows_and_blanks_the_last() {
         let mut grid = Grid::new(3, 4);
         for y in 0..4 {
-            grid.set(0, y, Cell::new(char::from(b'a' + y as u8), Pen::default(), 1));
+            grid.set(
+                0,
+                y,
+                Cell::new(char::from(b'a' + y as u8), Pen::default(), 1),
+            );
         }
         grid.scroll_up(0, 3, 1, Pen::default());
         assert_eq!(xs(grid.row(0)), "b  ");
@@ -314,7 +358,11 @@ mod tests {
     fn scrolling_respects_the_region() {
         let mut grid = Grid::new(2, 4);
         for y in 0..4 {
-            grid.set(0, y, Cell::new(char::from(b'a' + y as u8), Pen::default(), 1));
+            grid.set(
+                0,
+                y,
+                Cell::new(char::from(b'a' + y as u8), Pen::default(), 1),
+            );
         }
         grid.scroll_up(1, 2, 1, Pen::default());
         assert_eq!(grid.cell(0, 0).ch, 'a');
@@ -352,39 +400,5 @@ mod tests {
         assert!(!grid.is_dirty(0));
         grid.clear_dirty();
         assert!(!grid.any_dirty());
-    }
-}
-
-impl Grid {
-    /// Opens a gap of `count` cells at (`x`, `y`), shifting the rest right.
-    pub fn insert_cells(&mut self, y: u16, x: u16, count: u16, pen: Pen) {
-        if y >= self.rows || x >= self.cols || count == 0 {
-            return;
-        }
-        let cols = self.cols;
-        let count = count.min(cols - x);
-        let blank = Cell::blank(pen);
-        let mut row: Vec<Cell> = self.row(y).to_vec();
-        for i in 0..count {
-            row.insert(usize::from(x + i), blank);
-        }
-        row.truncate(usize::from(cols));
-        self.row_mut(y).copy_from_slice(&row);
-    }
-
-    /// Removes `count` cells at (`x`, `y`), shifting the rest left.
-    pub fn delete_cells(&mut self, y: u16, x: u16, count: u16, pen: Pen) {
-        if y >= self.rows || x >= self.cols || count == 0 {
-            return;
-        }
-        let cols = self.cols;
-        let count = count.min(cols - x);
-        let blank = Cell::blank(pen);
-        let mut row: Vec<Cell> = self.row(y).to_vec();
-        for _ in 0..count {
-            row.remove(usize::from(x));
-        }
-        row.resize(usize::from(cols), blank);
-        self.row_mut(y).copy_from_slice(&row);
     }
 }

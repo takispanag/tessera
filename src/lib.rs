@@ -9,17 +9,41 @@
 //! attribute handling and the dump format are all implemented in this crate,
 //! and it has no dependencies at all.
 //!
+//! # Example
+//!
+//! ```
+//! use tessera::{dump, Screen};
+//!
+//! let mut screen = Screen::new(20, 3);
+//! screen.feed("hello\r\nworld");
+//! assert_eq!(screen.line(0), "hello");
+//! assert_eq!(dump(&screen), "hello\nworld");
+//! ```
+//!
+//! # Layout
+//!
+//! | Module | Responsibility |
+//! |---|---|
+//! | [`cell`] | cells, colour and the pen |
+//! | [`grid`] | the cell grid, scrolling, erasing and resizing |
+//! | [`parser`] | the escape-sequence state machine |
+//! | [`screen`] | the screen: cursor, pen, modes, buffers, scrollback |
+//! | [`dump`] | rendering the grid back to text |
+//! | [`recording`] | replaying a `.vt` recording |
+//!
 //! # Scope
 //!
 //! The engine models the screen; it does not open a pty or paint pixels. A
-//! front end feeds it text and reads the grid back, which keeps the
-//! interesting part testable without a display.
+//! front end feeds it text and reads the grid back, which keeps the interesting
+//! part testable without a display. The work still ahead is listed in
+//! `ROADMAP.md`.
+
+mod csi;
+mod sgr;
 
 pub mod cell;
 pub mod dump;
 pub mod grid;
-mod csi;
-mod sgr;
 pub mod parser;
 pub mod recording;
 pub mod screen;

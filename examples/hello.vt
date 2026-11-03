@@ -1,0 +1,1 @@
+\e[1;32mTessera\e[0m is a terminal engine.\r\nIt parses the VT/xterm stream and keeps the screen.\r\n\r\n\e[33mIt does not open a pty or paint pixels.\e[0m\r\n\e[7m The grid is the part that can be checked. \e[0m

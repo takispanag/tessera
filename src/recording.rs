@@ -1,4 +1,4 @@
-﻿//! Replaying a terminal recording.
+//! Replaying a terminal recording.
 //!
 //! A recording is the byte stream a program would have sent, written as text so
 //! that it can live in the repository and be read in a diff. Escape bytes are
@@ -94,6 +94,9 @@ mod tests {
     #[test]
     fn a_coloured_recording_lands_in_the_right_cells() {
         let screen = play(4, 1, "\\e[32mok\\e[0m");
-        assert_eq!(screen.grid().cell(0, 0).pen.fg, crate::cell::Color::Indexed(2));
+        assert_eq!(
+            screen.grid().cell(0, 0).pen.fg,
+            crate::cell::Color::Indexed(2)
+        );
     }
 }

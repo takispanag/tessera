@@ -1,4 +1,4 @@
-﻿//! The escape-sequence state machine.
+//! The escape-sequence state machine.
 //!
 //! A terminal is fed a stream of characters in which most are ordinary text and
 //! a few open a control sequence. The parser's only job is to tell the two
@@ -183,7 +183,12 @@ impl Parser {
         match c {
             '0'..='9' => {
                 let digit = c as u16 - '0' as u16;
-                self.current = Some(self.current.unwrap_or(0).saturating_mul(10).saturating_add(digit));
+                self.current = Some(
+                    self.current
+                        .unwrap_or(0)
+                        .saturating_mul(10)
+                        .saturating_add(digit),
+                );
                 self.state = State::CsiParam;
                 None
             }
@@ -266,15 +271,15 @@ mod tests {
 
     #[test]
     fn text_prints_character_by_character() {
-        assert_eq!(
-            parse("hi"),
-            vec![Action::Print('h'), Action::Print('i')]
-        );
+        assert_eq!(parse("hi"), vec![Action::Print('h'), Action::Print('i')]);
     }
 
     #[test]
     fn control_characters_execute() {
-        assert_eq!(parse("\r\n"), vec![Action::Execute('\r'), Action::Execute('\n')]);
+        assert_eq!(
+            parse("\r\n"),
+            vec![Action::Execute('\r'), Action::Execute('\n')]
+        );
     }
 
     #[test]
