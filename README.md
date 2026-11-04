@@ -1,10 +1,10 @@
-﻿# Tessera
+# Tessera
 
 A terminal emulator engine written from scratch in Rust.
 
 Tessera takes the VT/xterm byte stream and keeps the screen a terminal would
 show: cells, attributes, the cursor, scroll regions, tab stops, the alternate
-screen and scrollback. It does not open a pty and it does not paint pixels β€” a
+screen and scrollback. It does not open a pty and it does not paint pixels — a
 front end feeds it text and reads the grid back, which keeps the interesting
 part testable without a display.
 
@@ -12,17 +12,17 @@ The engine has no dependencies. The parser, the grid, the attribute handling
 and the dump format are all in this crate.
 
 ```
-β”β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”
-β”‚  tessera (library)           β”‚   zero dependencies
-β”‚  parser Β· screen Β· dump      β”‚
-β””β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”¬β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”
-           β”‚
-    β”β”€β”€β”€β”€β”€β”€β”΄β”€β”€β”€β”€β”€β”€β”€β”
-    β”‚              β”‚
-β”β”€β”€β”€β–Όβ”€β”€β”€β”€β”€β”€β”  β”β”€β”€β”€β”€β–Όβ”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”
-β”‚ tessera- β”‚  β”‚ a front end      β”‚
-β”‚ dump     β”‚  β”‚ (not written yet)β”‚
-β””β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”  β””β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”€β”
+┌──────────────────────────────┐
+│  tessera (library)           │   zero dependencies
+│  parser · screen · dump      │
+└──────────┬───────────────────┘
+           │
+    ┌──────┴───────┐
+    │              │
+┌───▼──────┐  ┌────▼─────────────┐
+│ tessera- │  │ a front end      │
+│ dump     │  │ (not written yet)│
+└──────────┘  └──────────────────┘
 ```
 
 ## Status
@@ -67,10 +67,11 @@ escape:
 ## Using the engine
 
 ```rust
-use tessera::{dump, recording::play};
+use tessera::{dump, Screen};
 
-let screen = play(20, 3, "hello\\r\\nworld");
-assert_eq!(dump(&screen), "hello\\nworld");
+let mut screen = Screen::new(20, 3);
+screen.feed("hello\r\nworld");
+assert_eq!(dump(&screen), "hello\nworld");
 ```
 
 A front end keeps a `Screen`, calls `feed` with whatever arrived from the pty,
@@ -98,9 +99,9 @@ and reads `grid()`, `cursor()`, `title()` and `scrollback()` when painting.
 - **Scrolling snapshots its region.** Moving rows up or down overlaps, so the
   region is copied before it is written; scrolling by more than the region
   clears it rather than wrapping.
-- **Legality is not assumed.** Coordinates outside the grid read as blanks and
-  writes are ignored, and a parameter list that overflows saturates instead of
-  wrapping. A hostile or broken stream cannot take the engine down.
+- **The engine does not trust its input.** Coordinates outside the grid read as
+  blanks and writes are ignored, and a parameter list that overflows saturates
+  instead of wrapping. A hostile or broken stream cannot take the engine down.
 - **The alternate screen is a second grid.** Lines that leave the top of the
   main screen go to a bounded scrollback; the alternate screen never writes to
   it, because a full-screen program redrawing itself is not history.

@@ -1,4 +1,4 @@
-﻿//! Select graphic rendition.
+//! Select graphic rendition.
 //!
 //! `SGR` is the sequence that sets the pen: bold, colour, underline and the
 //! rest. An omitted parameter is read as zero, which is what xterm does, so an

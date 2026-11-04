@@ -21,7 +21,7 @@ pub struct Grid {
 }
 
 impl Grid {
-    /// A grid of `cols` Ξ“β€” `rows` blank cells.
+    /// A grid of `cols` × `rows` blank cells.
     pub fn new(cols: u16, rows: u16) -> Self {
         Grid {
             cols,
@@ -92,9 +92,7 @@ impl Grid {
     /// Fills the whole grid with blanks in `pen`.
     pub fn fill(&mut self, pen: Pen) {
         let blank = Cell::blank(pen);
-        for cell in &mut self.cells {
-            *cell = blank;
-        }
+        self.cells.fill(blank);
         self.mark_all_dirty();
     }
 
@@ -107,9 +105,7 @@ impl Grid {
             }
             let start = usize::from(y) * usize::from(self.cols);
             let end = start + usize::from(self.cols);
-            for cell in &mut self.cells[start..end] {
-                *cell = blank;
-            }
+            self.cells[start..end].fill(blank);
             self.dirty[usize::from(y)] = true;
         }
     }
@@ -172,9 +168,7 @@ impl Grid {
 
     /// Marks every row as needing a repaint.
     pub fn mark_all_dirty(&mut self) {
-        for flag in &mut self.dirty {
-            *flag = true;
-        }
+        self.dirty.fill(true);
     }
 
     /// Whether row `y` has changed since the last repaint.
@@ -189,9 +183,7 @@ impl Grid {
 
     /// Clears the dirty flags, as a front end does once it has repainted.
     pub fn clear_dirty(&mut self) {
-        for flag in &mut self.dirty {
-            *flag = false;
-        }
+        self.dirty.fill(false);
     }
 
     /// Resizes the grid, keeping the top-left corner.

@@ -1,4 +1,4 @@
-﻿//! Rendering the grid back to text.
+//! Rendering the grid back to text.
 //!
 //! A dump is the screen as plain text: one line per row, trailing blanks
 //! removed, no attributes. It is the format the conformance tests compare,

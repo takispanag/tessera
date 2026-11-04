@@ -1,4 +1,4 @@
-﻿//! Control-sequence dispatch.
+//! Control-sequence dispatch.
 //!
 //! The parser hands over one sequence at a time; this module decides what it
 //! means. Sequences are grouped the way ECMA-48 groups them: cursor movement,
